@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
 import L from 'leaflet';
-import 'leaflet/dist/leaflet.css';
 import {
   GraduationCap,
   Train,
@@ -16,6 +15,7 @@ import {
   CheckCircle2,
   X,
   Compass,
+  Map as MapIcon,
 } from 'lucide-react';
 import { Property, School } from '../types';
 import {
@@ -23,6 +23,7 @@ import {
   ONEMAP_BASEMAP_OPTIONS,
   ONEMAP_MAP_STYLES,
 } from '../../api/basemap';
+import { OneMapMinimap } from './OneMapMinimap';
 
 interface GeodesicMapProps {
   school: School;
@@ -52,7 +53,6 @@ function getPropertyLatLng(prop: Property, schoolLatLng: [number, number]): [num
   if ((prop as any).lat && (prop as any).lng) {
     return [(prop as any).lat, (prop as any).lng];
   }
-  // 145px ≈ 1000m => delta offset calculation
   const centerMapX = 370;
   const centerMapY = 370;
   const deltaX = (prop.mapPos.x - centerMapX) * 0.000062;
@@ -89,6 +89,8 @@ export const GeodesicMap: React.FC<GeodesicMapProps> = ({
   const [show2kmZone, setShow2kmZone] = useState(true);
   const [showMrt, setShowMrt] = useState(true);
   const [showPreschools, setShowPreschools] = useState(false);
+  const [showMinimap, setShowMinimap] = useState(true);
+  const [isMinimapExpanded, setIsMinimapExpanded] = useState(false);
   const [activeStyle, setActiveStyle] = useState<'Default' | 'Night' | 'Original' | 'Grey'>('Default');
   const [styleMenuOpen, setStyleMenuOpen] = useState(false);
   const [currentZoom, setCurrentZoom] = useState(15);
@@ -96,9 +98,18 @@ export const GeodesicMap: React.FC<GeodesicMapProps> = ({
 
   const schoolLatLng = getSchoolLatLng(school);
 
-  // 1. Initialize Leaflet Map with OneMap SLA Tile Layer
+  // 1. Initialize Leaflet Map with OneMap SLA Tile Layer & Vercel layout resilience
   useEffect(() => {
     if (!mapContainerRef.current) return;
+
+    // React 18/19 StrictMode cleanup: clear stale leaflet instance from container
+    if ((mapContainerRef.current as any)._leaflet_id != null) {
+      if (mapInstanceRef.current) {
+        mapInstanceRef.current.remove();
+        mapInstanceRef.current = null;
+      }
+      delete (mapContainerRef.current as any)._leaflet_id;
+    }
 
     if (!mapInstanceRef.current) {
       const map = L.map(mapContainerRef.current, {
@@ -111,12 +122,13 @@ export const GeodesicMap: React.FC<GeodesicMapProps> = ({
         scrollWheelZoom: true,
       });
 
-      // OneMap SLA Live Tile Layer
+      // OneMap SLA Live Tile Layer with cross-origin
       const basemap = L.tileLayer(ONEMAP_MAP_STYLES[activeStyle] || ONEMAP_BASEMAP_TILE_URL, {
         detectRetina: true,
         maxZoom: 19,
         minZoom: 11,
         attribution: ONEMAP_BASEMAP_OPTIONS.attribution,
+        crossOrigin: true,
       });
       basemap.addTo(map);
       tileLayerRef.current = basemap;
@@ -137,14 +149,35 @@ export const GeodesicMap: React.FC<GeodesicMapProps> = ({
       });
 
       mapInstanceRef.current = map;
-    }
 
-    return () => {
-      if (mapInstanceRef.current) {
-        mapInstanceRef.current.remove();
-        mapInstanceRef.current = null;
+      // Ensure Leaflet tiles render reliably after CSS calculation on Vercel
+      requestAnimationFrame(() => {
+        map.invalidateSize();
+      });
+      const t1 = setTimeout(() => map.invalidateSize(), 150);
+      const t2 = setTimeout(() => map.invalidateSize(), 600);
+
+      let observer: ResizeObserver | null = null;
+      if (typeof ResizeObserver !== 'undefined' && mapContainerRef.current) {
+        observer = new ResizeObserver(() => {
+          mapInstanceRef.current?.invalidateSize();
+        });
+        observer.observe(mapContainerRef.current);
       }
-    };
+
+      return () => {
+        clearTimeout(t1);
+        clearTimeout(t2);
+        observer?.disconnect();
+        if (mapInstanceRef.current) {
+          mapInstanceRef.current.remove();
+          mapInstanceRef.current = null;
+        }
+        if (mapContainerRef.current) {
+          delete (mapContainerRef.current as any)._leaflet_id;
+        }
+      };
+    }
   }, []);
 
   // 2. Change Tile Style when activeStyle changes
@@ -158,6 +191,9 @@ export const GeodesicMap: React.FC<GeodesicMapProps> = ({
   useEffect(() => {
     if (mapInstanceRef.current) {
       mapInstanceRef.current.setView(schoolLatLng, 15);
+      setTimeout(() => {
+        mapInstanceRef.current?.invalidateSize();
+      }, 100);
     }
   }, [school.id]);
 
@@ -284,7 +320,7 @@ export const GeodesicMap: React.FC<GeodesicMapProps> = ({
         <div style="transform: translate(-50%, -100%); display: flex; flex-direction: column; align-items: center; cursor: pointer; z-index: 50;">
           <div style="position: relative; display: flex; align-items: center; justify-content: center;">
             <span style="position: absolute; width: 44px; height: 44px; border-radius: 9999px; background: rgba(15, 23, 42, 0.25); animation: ping 2s cubic-bezier(0, 0, 0.2, 1) infinite;"></span>
-            <div style="width: 38px; height: 38px; border-radius: 14px; background: #0f172a; color: #ffffff; display: flex; align-items: center; justify-content: center; box-shadow: 0 6px 16px rgba(0,0,0,0.35); border: 2.5px solid #ffffff; ring: 2px solid #0f172a;">
+            <div style="width: 38px; height: 38px; border-radius: 14px; background: #0f172a; color: #ffffff; display: flex; align-items: center; justify-content: center; box-shadow: 0 6px 16px rgba(0,0,0,0.35); border: 2.5px solid #ffffff;">
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#fbbf24" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
                 <path d="M22 10v6M2 10l10-5 10 5-10 5z"/>
                 <path d="M6 12v5c3 3 9 3 12 0v-5"/>
@@ -317,13 +353,11 @@ export const GeodesicMap: React.FC<GeodesicMapProps> = ({
       const isSelected = selectedProperty?.id === prop.id;
       const is1km = prop.distanceKm <= 1.0;
 
-      // Price Formatting
       const priceText =
         prop.price >= 1000000
           ? `$${(prop.price / 1000000).toFixed(2)}M`
           : `$${(prop.price / 1000).toFixed(0)}k`;
 
-      // Styling based on 1km vs 2km and HDB vs Condo
       let bgColor = '#ffffff';
       let textColor = '#0f172a';
       let borderColor = '#cbd5e1';
@@ -370,7 +404,6 @@ export const GeodesicMap: React.FC<GeodesicMapProps> = ({
         zIndexOffset: isSelected ? 500 : 100,
       });
 
-      // Events
       marker.on('click', () => {
         onSelectProperty(prop);
       });
@@ -407,7 +440,6 @@ export const GeodesicMap: React.FC<GeodesicMapProps> = ({
     });
   }, [school.id, properties, selectedProperty?.id]);
 
-  // Center on school
   const handleCenterSchool = () => {
     if (mapInstanceRef.current) {
       mapInstanceRef.current.flyTo(schoolLatLng, 15, { duration: 1.2 });
@@ -469,6 +501,20 @@ export const GeodesicMap: React.FC<GeodesicMapProps> = ({
 
         {/* Right HUD Controls */}
         <div className="flex items-center gap-2 pointer-events-auto">
+          {/* Minimap Toggle */}
+          <button
+            onClick={() => setShowMinimap(!showMinimap)}
+            className={`px-3 py-1.5 rounded-xl border shadow-xs flex items-center gap-1.5 text-xs font-semibold backdrop-blur transition cursor-pointer ${
+              showMinimap
+                ? 'bg-sky-50 text-sky-900 border-sky-300 shadow-sm'
+                : 'bg-white/95 text-slate-700 border-slate-200 hover:bg-slate-50'
+            }`}
+            title="Toggle OneMap Realtime SLA Minimap"
+          >
+            <Compass className={`w-3.5 h-3.5 ${showMinimap ? 'text-sky-600' : 'text-slate-500'}`} />
+            <span>SLA Minimap</span>
+          </button>
+
           {/* Basemap Style Switcher */}
           <div className="relative">
             <button
@@ -532,8 +578,39 @@ export const GeodesicMap: React.FC<GeodesicMapProps> = ({
       </div>
 
       {/* Main Leaflet Map Stage: OneMap SLA Live Basemap */}
-      <div className="flex-1 w-full h-full relative cursor-grab active:cursor-grabbing">
-        <div ref={mapContainerRef} className="w-full h-full" />
+      <div className="flex-1 w-full h-full relative cursor-grab active:cursor-grabbing min-h-[500px] bg-slate-100">
+        <div
+          ref={mapContainerRef}
+          className="w-full h-full min-h-[500px]"
+          style={{ width: '100%', height: '100%', minHeight: '500px' }}
+        />
+
+        {/* Realtime SLA Minimap Floating Widget */}
+        {showMinimap && (
+          <OneMapMinimap
+            school={school}
+            properties={properties}
+            selectedProperty={selectedProperty}
+            onSelectProperty={onSelectProperty}
+            show1kmZone={show1kmZone}
+            show2kmZone={show2kmZone}
+            isExpanded={isMinimapExpanded}
+            onToggleExpand={() => setIsMinimapExpanded(!isMinimapExpanded)}
+            onClose={() => setShowMinimap(false)}
+          />
+        )}
+
+        {/* Re-open Minimap floating button if closed */}
+        {!showMinimap && (
+          <button
+            onClick={() => setShowMinimap(true)}
+            className="absolute bottom-8 right-4 z-30 px-3 py-2 bg-slate-900/95 text-white rounded-xl shadow-xl border border-slate-700 text-xs font-bold flex items-center gap-2 hover:bg-slate-800 transition cursor-pointer backdrop-blur"
+            title="Open OneMap Realtime SLA Minimap"
+          >
+            <Compass className="w-4 h-4 text-emerald-400" />
+            <span>Open OneMap SLA Minimap</span>
+          </button>
+        )}
 
         {/* Hovered Property Tooltip Card */}
         {hoveredProperty && !selectedProperty && (
@@ -608,33 +685,35 @@ export const GeodesicMap: React.FC<GeodesicMapProps> = ({
           </div>
         )}
 
-        {/* Map Zoom & Location Floating Buttons */}
-        <div className="absolute bottom-10 right-4 z-30 flex flex-col gap-1.5">
-          <button
-            onClick={handleZoomIn}
-            aria-label="Zoom in"
-            title="Zoom in on OneMap tiles"
-            className="w-9 h-9 bg-white/95 rounded-xl shadow-md border border-slate-200 flex items-center justify-center text-slate-700 hover:bg-white transition cursor-pointer"
-          >
-            <Plus className="w-4 h-4" />
-          </button>
-          <button
-            onClick={handleZoomOut}
-            aria-label="Zoom out"
-            title="Zoom out on OneMap tiles"
-            className="w-9 h-9 bg-white/95 rounded-xl shadow-md border border-slate-200 flex items-center justify-center text-slate-700 hover:bg-white transition cursor-pointer"
-          >
-            <Minus className="w-4 h-4" />
-          </button>
-          <button
-            onClick={handleCenterSchool}
-            aria-label="Center on school"
-            title="Re-center on Target School"
-            className="w-9 h-9 bg-white/95 rounded-xl shadow-md border border-slate-200 flex items-center justify-center text-slate-700 hover:bg-white transition mt-1 cursor-pointer"
-          >
-            <Crosshair className="w-4 h-4 text-sky-600" />
-          </button>
-        </div>
+        {/* Map Zoom & Location Floating Buttons (shown when minimap is not expanded) */}
+        {!isMinimapExpanded && (
+          <div className="absolute top-18 right-4 z-30 flex flex-col gap-1.5">
+            <button
+              onClick={handleZoomIn}
+              aria-label="Zoom in"
+              title="Zoom in on OneMap tiles"
+              className="w-9 h-9 bg-white/95 rounded-xl shadow-md border border-slate-200 flex items-center justify-center text-slate-700 hover:bg-white transition cursor-pointer"
+            >
+              <Plus className="w-4 h-4" />
+            </button>
+            <button
+              onClick={handleZoomOut}
+              aria-label="Zoom out"
+              title="Zoom out on OneMap tiles"
+              className="w-9 h-9 bg-white/95 rounded-xl shadow-md border border-slate-200 flex items-center justify-center text-slate-700 hover:bg-white transition cursor-pointer"
+            >
+              <Minus className="w-4 h-4" />
+            </button>
+            <button
+              onClick={handleCenterSchool}
+              aria-label="Center on school"
+              title="Re-center on Target School"
+              className="w-9 h-9 bg-white/95 rounded-xl shadow-md border border-slate-200 flex items-center justify-center text-slate-700 hover:bg-white transition mt-1 cursor-pointer"
+            >
+              <Crosshair className="w-4 h-4 text-sky-600" />
+            </button>
+          </div>
+        )}
 
         {/* Bottom Geodesic Legal Footnote & Attribution */}
         <div className="absolute bottom-0 left-0 right-0 bg-white/90 backdrop-blur-md px-3 py-1.5 text-[10px] text-slate-500 border-t border-slate-200 flex items-center justify-between z-20">

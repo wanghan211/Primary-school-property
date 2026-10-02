@@ -1,6 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
 import L from 'leaflet';
-import 'leaflet/dist/leaflet.css';
 import {
   Maximize2,
   Minimize2,
@@ -13,7 +12,11 @@ import {
   Compass,
 } from 'lucide-react';
 import { School, Property } from '../types';
-import { ONEMAP_BASEMAP_TILE_URL, ONEMAP_BASEMAP_OPTIONS, ONEMAP_MAP_STYLES } from '../../api/basemap';
+import {
+  ONEMAP_BASEMAP_TILE_URL,
+  ONEMAP_BASEMAP_OPTIONS,
+  ONEMAP_MAP_STYLES,
+} from '../../api/basemap';
 
 interface OneMapMinimapProps {
   school: School;
@@ -24,6 +27,7 @@ interface OneMapMinimapProps {
   show2kmZone?: boolean;
   isExpanded?: boolean;
   onToggleExpand?: () => void;
+  onClose?: () => void;
 }
 
 // Convert school/property mapPos to real Singapore lat/lng
@@ -31,11 +35,11 @@ function getSchoolLatLng(school: School): [number, number] {
   if ((school as any).lat && (school as any).lng) {
     return [(school as any).lat, (school as any).lng];
   }
-  // Tao Nan School default (49 Marine Crescent, Singapore 449761)
   if (school.id === 'tao-nan') return [1.30472, 103.90972];
-  if (school.id === 'rosyth') return [1.3725, 103.8744];
-  if (school.id === 'nyps') return [1.3197, 103.8066];
+  if (school.id === 'nanyang-primary') return [1.3211, 103.8078];
   if (school.id === 'acs-primary') return [1.3184, 103.8378];
+  if (school.id === 'catholic-high') return [1.3546, 103.8447];
+  if (school.id === 'rosyth') return [1.3725, 103.8744];
   if (school.id === 'chij-st-nicholas') return [1.3732, 103.8344];
   return [1.30472, 103.90972];
 }
@@ -44,7 +48,6 @@ function getPropertyLatLng(prop: Property, schoolLatLng: [number, number]): [num
   if ((prop as any).lat && (prop as any).lng) {
     return [(prop as any).lat, (prop as any).lng];
   }
-  // 145px ≈ 1000m => 1px ≈ 6.89m => delta lat ≈ 1px * 0.000062
   const centerMapX = 370;
   const centerMapY = 370;
   const deltaX = (prop.mapPos.x - centerMapX) * 0.000062;
@@ -61,6 +64,7 @@ export const OneMapMinimap: React.FC<OneMapMinimapProps> = ({
   show2kmZone = true,
   isExpanded = false,
   onToggleExpand,
+  onClose,
 }) => {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<L.Map | null>(null);
@@ -70,14 +74,23 @@ export const OneMapMinimap: React.FC<OneMapMinimapProps> = ({
 
   const [activeStyle, setActiveStyle] = useState<'Default' | 'Night' | 'Original' | 'Grey'>('Default');
   const [styleMenuOpen, setStyleMenuOpen] = useState(false);
-  const [currentZoom, setCurrentZoom] = useState(15);
+  const [currentZoom, setCurrentZoom] = useState(14);
   const [isHovered, setIsHovered] = useState(false);
 
   const schoolLatLng = getSchoolLatLng(school);
 
-  // Initialize Leaflet Map
+  // Initialize Leaflet Map with robust Vercel / React 18+ strict mode handling
   useEffect(() => {
     if (!mapContainerRef.current) return;
+
+    // React 18/19 StrictMode cleanup: clear stale leaflet instance from container
+    if ((mapContainerRef.current as any)._leaflet_id != null) {
+      if (mapInstanceRef.current) {
+        mapInstanceRef.current.remove();
+        mapInstanceRef.current = null;
+      }
+      delete (mapContainerRef.current as any)._leaflet_id;
+    }
 
     if (!mapInstanceRef.current) {
       const map = L.map(mapContainerRef.current, {
@@ -96,6 +109,7 @@ export const OneMapMinimap: React.FC<OneMapMinimapProps> = ({
         maxZoom: 19,
         minZoom: 11,
         attribution: ONEMAP_BASEMAP_OPTIONS.attribution,
+        crossOrigin: true,
       });
       basemap.addTo(map);
       tileLayerRef.current = basemap;
@@ -111,14 +125,35 @@ export const OneMapMinimap: React.FC<OneMapMinimapProps> = ({
       });
 
       mapInstanceRef.current = map;
-    }
 
-    return () => {
-      if (mapInstanceRef.current) {
-        mapInstanceRef.current.remove();
-        mapInstanceRef.current = null;
+      // Ensure Leaflet tiles render reliably after CSS calculation on Vercel
+      requestAnimationFrame(() => {
+        map.invalidateSize();
+      });
+      const t1 = setTimeout(() => map.invalidateSize(), 150);
+      const t2 = setTimeout(() => map.invalidateSize(), 500);
+
+      let observer: ResizeObserver | null = null;
+      if (typeof ResizeObserver !== 'undefined' && mapContainerRef.current) {
+        observer = new ResizeObserver(() => {
+          mapInstanceRef.current?.invalidateSize();
+        });
+        observer.observe(mapContainerRef.current);
       }
-    };
+
+      return () => {
+        clearTimeout(t1);
+        clearTimeout(t2);
+        observer?.disconnect();
+        if (mapInstanceRef.current) {
+          mapInstanceRef.current.remove();
+          mapInstanceRef.current = null;
+        }
+        if (mapContainerRef.current) {
+          delete (mapContainerRef.current as any)._leaflet_id;
+        }
+      };
+    }
   }, []);
 
   // Update Tile Style
@@ -133,7 +168,7 @@ export const OneMapMinimap: React.FC<OneMapMinimapProps> = ({
     if (mapInstanceRef.current) {
       setTimeout(() => {
         mapInstanceRef.current?.invalidateSize();
-      }, 200);
+      }, 150);
     }
   }, [isExpanded]);
 
@@ -141,6 +176,9 @@ export const OneMapMinimap: React.FC<OneMapMinimapProps> = ({
   useEffect(() => {
     if (mapInstanceRef.current) {
       mapInstanceRef.current.setView(schoolLatLng, isExpanded ? 15 : 14);
+      setTimeout(() => {
+        mapInstanceRef.current?.invalidateSize();
+      }, 100);
     }
   }, [school.id, isExpanded]);
 
@@ -208,7 +246,7 @@ export const OneMapMinimap: React.FC<OneMapMinimapProps> = ({
     `);
     schoolMarker.addTo(markersLayer);
 
-    // Property Pins
+    // Property Pins within 1km and 2km
     properties.forEach((prop) => {
       const propLatLng = getPropertyLatLng(prop, schoolLatLng);
       const isSelected = selectedProperty?.id === prop.id;
@@ -280,22 +318,23 @@ export const OneMapMinimap: React.FC<OneMapMinimapProps> = ({
 
   return (
     <div
-      className={`transition-all duration-300 ease-in-out z-30 shadow-2xl rounded-2xl overflow-hidden border border-slate-300 bg-white flex flex-col ${
+      className={`transition-all duration-300 ease-in-out z-40 shadow-2xl rounded-2xl overflow-hidden border border-slate-300 bg-white flex flex-col ${
         isExpanded
-          ? 'absolute inset-3 sm:inset-5 z-40'
-          : 'absolute bottom-4 right-4 w-72 sm:w-84 h-56 sm:h-64'
+          ? 'absolute inset-3 sm:inset-5 z-50'
+          : 'absolute bottom-8 right-4 w-76 sm:w-88 h-60 sm:h-72'
       }`}
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => {
         setIsHovered(false);
         setStyleMenuOpen(false);
       }}
+      data-purpose="onemap-realtime-sla-minimap"
     >
       {/* Minimap Top Header HUD */}
-      <div className="bg-slate-900/90 backdrop-blur-md px-3 py-2 text-white flex items-center justify-between text-xs z-10 border-b border-slate-700/60 select-none">
+      <div className="bg-slate-900/95 backdrop-blur-md px-3 py-2 text-white flex items-center justify-between text-xs z-10 border-b border-slate-700/60 select-none">
         <div className="flex items-center gap-1.5 font-bold truncate">
-          <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-          <span className="truncate">OneMap SLA Live Basemap</span>
+          <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse"></span>
+          <span className="truncate">OneMap SLA Realtime Minimap</span>
           <span className="text-[10px] text-slate-400 font-mono hidden sm:inline">
             (z{currentZoom})
           </span>
@@ -356,12 +395,27 @@ export const OneMapMinimap: React.FC<OneMapMinimapProps> = ({
               )}
             </button>
           )}
+
+          {/* Close Minimap */}
+          {onClose && (
+            <button
+              onClick={onClose}
+              className="p-1 rounded-md text-slate-300 hover:text-white hover:bg-slate-800 transition cursor-pointer"
+              title="Hide Minimap"
+            >
+              <X className="w-3.5 h-3.5 text-slate-400 hover:text-white" />
+            </button>
+          )}
         </div>
       </div>
 
-      {/* Leaflet Map Canvas Container */}
-      <div className="flex-1 w-full h-full relative cursor-grab active:cursor-grabbing">
-        <div ref={mapContainerRef} className="w-full h-full" />
+      {/* Leaflet Map Canvas Container with Explicit Minimum Dimensions */}
+      <div className="flex-1 w-full h-full relative cursor-grab active:cursor-grabbing min-h-[160px] bg-slate-100">
+        <div
+          ref={mapContainerRef}
+          className="w-full h-full min-h-[160px]"
+          style={{ width: '100%', height: '100%', minHeight: '160px' }}
+        />
 
         {/* Floating Zoom Controls for Minimap */}
         <div className="absolute bottom-6 right-2 z-10 flex flex-col gap-1">
@@ -382,7 +436,7 @@ export const OneMapMinimap: React.FC<OneMapMinimapProps> = ({
         </div>
 
         {/* Bottom Attribution Notice (SLA Mandated) */}
-        <div className="absolute bottom-0 left-0 right-0 bg-white/85 backdrop-blur-xs px-2 py-0.5 text-[9px] text-slate-600 flex items-center justify-between border-t border-slate-200/60 z-10 pointer-events-auto">
+        <div className="absolute bottom-0 left-0 right-0 bg-white/90 backdrop-blur-xs px-2 py-0.5 text-[9px] text-slate-600 flex items-center justify-between border-t border-slate-200/60 z-10 pointer-events-auto">
           <div
             className="flex items-center gap-1 truncate"
             dangerouslySetInnerHTML={{ __html: ONEMAP_BASEMAP_OPTIONS.attribution }}
