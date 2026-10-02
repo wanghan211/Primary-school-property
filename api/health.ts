@@ -46,6 +46,8 @@ export default async function handler(req: any, res: any) {
       { path: '/api/onemap/route', method: 'GET', description: 'Walking directions and travel time' },
       { path: '/api/onemap/reverse-geocode', method: 'GET', description: 'Reverse geocode coordinates to postal address' },
       { path: '/api/onemap/education', method: 'GET', description: 'Planning area education statistics' },
+      { path: '/api/onemap/basemap', method: 'GET', description: 'Official OneMap SLA Leaflet tile layer configuration' },
+      { path: '/api/basemap', method: 'GET', description: 'OneMap SLA Leaflet tile layer configuration and tile proxy' },
       { path: '/api/hdb/resale', method: 'GET', description: 'Data.gov.sg 10,000 HDB resale transactions with analytics' },
       { path: '/api/ura/token', method: 'GET, POST', description: 'URA daily token exchange and verification' },
       { path: '/api/ura/transactions', method: 'GET', description: 'URA private residential property transactions (4 batches merged)' },

@@ -26,6 +26,7 @@ import healthHandler from './api/health.ts';
 import uraTokenHandler from './api/ura/token.ts';
 import uraTransactionsHandler from './api/ura/transactions.ts';
 import uraCarparksHandler from './api/ura/carparks.ts';
+import basemapHandler from './api/basemap.ts';
 
 // Mount API routes
 app.all('/api/health', (req, res) => healthHandler(req, res));
@@ -36,6 +37,8 @@ app.all('/api/onemap/route', (req, res) => routeHandler(req, res));
 app.all('/api/onemap/education', (req, res) => educationHandler(req, res));
 app.all('/api/onemap/radius', (req, res) => radiusHandler(req, res));
 app.all('/api/radius', (req, res) => radiusHandler(req, res));
+app.all('/api/onemap/basemap', (req, res) => basemapHandler(req, res));
+app.all('/api/basemap', (req, res) => basemapHandler(req, res));
 app.all('/api/hdb/resale', (req, res) => hdbResaleHandler(req, res));
 
 // URA Data Service routes
