@@ -49,6 +49,7 @@ export default async function handler(req: any, res: any) {
       { path: '/api/hdb/resale', method: 'GET', description: 'Data.gov.sg 10,000 HDB resale transactions with analytics' },
       { path: '/api/ura/token', method: 'GET, POST', description: 'URA daily token exchange and verification' },
       { path: '/api/ura/transactions', method: 'GET', description: 'URA private residential property transactions (4 batches merged)' },
+      { path: '/api/private-property', method: 'GET', description: 'Private property transactions (exact URA Space JSON schema: Status + Result)' },
       { path: '/api/ura/carparks', method: 'GET', description: 'URA live carpark lots availability and rates' },
     ],
   };

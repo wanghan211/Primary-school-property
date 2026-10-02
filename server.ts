@@ -42,6 +42,7 @@ app.all('/api/hdb/resale', (req, res) => hdbResaleHandler(req, res));
 app.all('/api/ura/token', (req, res) => uraTokenHandler(req, res));
 app.all('/api/ura/transactions', (req, res) => uraTransactionsHandler(req, res));
 app.all('/api/ura/private-property', (req, res) => uraTransactionsHandler(req, res));
+app.all('/api/private-property', (req, res) => uraTransactionsHandler(req, res));
 app.all('/api/ura/carparks', (req, res) => uraCarparksHandler(req, res));
 
 async function startServer() {

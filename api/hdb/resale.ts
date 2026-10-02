@@ -50,7 +50,7 @@ async function getOrFetchHdbDataset(): Promise<ProcessedTransaction[]> {
 
   try {
     const url =
-      'https://data.gov.sg/api/action/datastore_search?resource_id=d_8b84c4ee58e3cfc0ece0d773c8ca6abc&limit=10000';
+      'https://data.gov.sg/api/action/datastore_search?resource_id=d_8b84c4ee58e3cfc0ece0d773c8ca6abc&limit=10000&sort=month%20desc';
     const resp = await fetch(url, {
       headers: {
         Accept: 'application/json',
@@ -90,6 +90,9 @@ async function getOrFetchHdbDataset(): Promise<ProcessedTransaction[]> {
         psf,
       };
     });
+
+    // Ensure sorted by month descending (most recent first)
+    processed.sort((a, b) => b.month.localeCompare(a.month));
 
     cachedDataset = processed;
     lastCacheFetchTime = now;
