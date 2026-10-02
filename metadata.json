@@ -1,0 +1,6 @@
+{
+  "name": "EduHomes SG - School Radius & MOE P1 Property Intelligence",
+  "description": "Singapore primary school 1km/2km geodesic radius explorer, MOE Phase 2C balloting analytics, and property transaction intelligence.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
