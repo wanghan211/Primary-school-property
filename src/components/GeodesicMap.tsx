@@ -9,8 +9,11 @@ import {
   Info,
   ExternalLink,
   Footprints,
+  Map as MapIcon,
+  Compass,
 } from 'lucide-react';
 import { Property, School } from '../types';
+import { OneMapMinimap } from './OneMapMinimap';
 
 interface GeodesicMapProps {
   school: School;
@@ -33,6 +36,8 @@ export const GeodesicMap: React.FC<GeodesicMapProps> = ({
   const [show2kmZone, setShow2kmZone] = useState(true);
   const [showMrt, setShowMrt] = useState(true);
   const [showPreschools, setShowPreschools] = useState(false);
+  const [showMinimap, setShowMinimap] = useState(true);
+  const [isMinimapExpanded, setIsMinimapExpanded] = useState(false);
   const [zoomLevel, setZoomLevel] = useState(1);
   const [hoveredProperty, setHoveredProperty] = useState<Property | null>(null);
 
@@ -89,6 +94,19 @@ export const GeodesicMap: React.FC<GeodesicMapProps> = ({
         </div>
 
         <div className="flex items-center gap-2 pointer-events-auto">
+          <button
+            onClick={() => setShowMinimap(!showMinimap)}
+            className={`px-3 py-1.5 rounded-xl border shadow-xs flex items-center gap-1.5 text-xs font-semibold backdrop-blur transition cursor-pointer ${
+              showMinimap
+                ? 'bg-sky-50 text-sky-900 border-sky-300 shadow-sm'
+                : 'bg-white/95 text-slate-700 border-slate-200 hover:bg-slate-50'
+            }`}
+            title="Toggle OneMap Singapore SLA Live Basemap"
+          >
+            <MapIcon className={`w-3.5 h-3.5 ${showMinimap ? 'text-sky-600' : 'text-slate-500'}`} />
+            <span>OneMap Basemap</span>
+          </button>
+
           <button
             onClick={() => setShowMrt(!showMrt)}
             className={`px-3 py-1.5 rounded-xl border shadow-xs flex items-center gap-1.5 text-xs font-semibold backdrop-blur transition cursor-pointer ${
@@ -437,41 +455,70 @@ export const GeodesicMap: React.FC<GeodesicMapProps> = ({
           </div>
         )}
 
-        {/* Map Zoom & Location Floating Buttons */}
-        <div className="absolute bottom-5 right-5 z-20 flex flex-col gap-1.5">
+        {/* OneMap SLA Live Tile Minimap Layer */}
+        {showMinimap ? (
+          <OneMapMinimap
+            school={school}
+            properties={properties}
+            selectedProperty={selectedProperty}
+            onSelectProperty={onSelectProperty}
+            show1kmZone={show1kmZone}
+            show2kmZone={show2kmZone}
+            isExpanded={isMinimapExpanded}
+            onToggleExpand={() => setIsMinimapExpanded(!isMinimapExpanded)}
+          />
+        ) : (
           <button
-            onClick={handleZoomIn}
-            aria-label="Zoom in"
-            className="w-9 h-9 bg-white rounded-xl shadow-md border border-slate-200 flex items-center justify-center text-slate-700 hover:bg-slate-50 transition cursor-pointer"
+            onClick={() => setShowMinimap(true)}
+            className="absolute bottom-5 right-5 z-20 px-3 py-2 bg-slate-900/95 text-white rounded-xl shadow-xl border border-slate-700 text-xs font-bold flex items-center gap-2 hover:bg-slate-800 transition cursor-pointer backdrop-blur"
+            title="Open interactive OneMap Singapore Leaflet Basemap"
           >
-            <Plus className="w-4 h-4" />
+            <Compass className="w-4 h-4 text-emerald-400" />
+            <span>Open OneMap SLA Minimap</span>
           </button>
-          <button
-            onClick={handleZoomOut}
-            aria-label="Zoom out"
-            className="w-9 h-9 bg-white rounded-xl shadow-md border border-slate-200 flex items-center justify-center text-slate-700 hover:bg-slate-50 transition cursor-pointer"
-          >
-            <Minus className="w-4 h-4" />
-          </button>
-          <button
-            onClick={handleResetZoom}
-            aria-label="Reset map view"
-            title="Reset to center"
-            className="w-9 h-9 bg-white rounded-xl shadow-md border border-slate-200 flex items-center justify-center text-slate-700 hover:bg-slate-50 transition mt-1 cursor-pointer"
-          >
-            <Crosshair className="w-4 h-4 text-sky-600" />
-          </button>
-        </div>
+        )}
+
+        {/* Vector Stage Zoom Controls (shown only when minimap is collapsed or docked) */}
+        {!isMinimapExpanded && (
+          <div className="absolute top-16 right-4 z-20 flex flex-col gap-1.5 pointer-events-auto">
+            <button
+              onClick={handleZoomIn}
+              aria-label="Zoom in schematic"
+              title="Zoom in vector view"
+              className="w-8 h-8 bg-white/95 rounded-lg shadow-sm border border-slate-200 flex items-center justify-center text-slate-700 hover:bg-white transition cursor-pointer"
+            >
+              <Plus className="w-3.5 h-3.5" />
+            </button>
+            <button
+              onClick={handleZoomOut}
+              aria-label="Zoom out schematic"
+              title="Zoom out vector view"
+              className="w-8 h-8 bg-white/95 rounded-lg shadow-sm border border-slate-200 flex items-center justify-center text-slate-700 hover:bg-white transition cursor-pointer"
+            >
+              <Minus className="w-3.5 h-3.5" />
+            </button>
+            <button
+              onClick={handleResetZoom}
+              aria-label="Reset schematic view"
+              title="Reset center"
+              className="w-8 h-8 bg-white/95 rounded-lg shadow-sm border border-slate-200 flex items-center justify-center text-slate-700 hover:bg-white transition cursor-pointer"
+            >
+              <Crosshair className="w-3.5 h-3.5 text-sky-600" />
+            </button>
+          </div>
+        )}
 
         {/* Bottom Geodesic Legal Footnote */}
-        <div
-          onClick={onOpenGeodesicInfo}
-          className="absolute bottom-4 left-4 z-20 bg-white/90 backdrop-blur px-3 py-1.5 rounded-lg border border-slate-200 text-[11px] text-slate-500 flex items-center gap-1.5 shadow-xs cursor-pointer hover:bg-white hover:text-slate-800 transition"
-        >
-          <Info className="w-3.5 h-3.5 text-slate-400" />
-          <span>Distances computed from school perimeter boundary under 2022 MOE revision</span>
-          <ExternalLink className="w-3 h-3 ml-1 text-slate-400" />
-        </div>
+        {!isMinimapExpanded && (
+          <div
+            onClick={onOpenGeodesicInfo}
+            className="absolute bottom-4 left-4 z-20 bg-white/90 backdrop-blur px-3 py-1.5 rounded-lg border border-slate-200 text-[11px] text-slate-500 flex items-center gap-1.5 shadow-xs cursor-pointer hover:bg-white hover:text-slate-800 transition"
+          >
+            <Info className="w-3.5 h-3.5 text-slate-400" />
+            <span>Distances computed from school perimeter boundary under 2022 MOE revision</span>
+            <ExternalLink className="w-3 h-3 ml-1 text-slate-400" />
+          </div>
+        )}
       </div>
     </section>
   );
