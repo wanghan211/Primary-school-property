@@ -23,6 +23,9 @@ import educationHandler from './api/onemap/education.ts';
 import radiusHandler from './api/onemap/radius.ts';
 import hdbResaleHandler from './api/hdb/resale.ts';
 import healthHandler from './api/health.ts';
+import uraTokenHandler from './api/ura/token.ts';
+import uraTransactionsHandler from './api/ura/transactions.ts';
+import uraCarparksHandler from './api/ura/carparks.ts';
 
 // Mount API routes
 app.all('/api/health', (req, res) => healthHandler(req, res));
@@ -34,6 +37,12 @@ app.all('/api/onemap/education', (req, res) => educationHandler(req, res));
 app.all('/api/onemap/radius', (req, res) => radiusHandler(req, res));
 app.all('/api/radius', (req, res) => radiusHandler(req, res));
 app.all('/api/hdb/resale', (req, res) => hdbResaleHandler(req, res));
+
+// URA Data Service routes
+app.all('/api/ura/token', (req, res) => uraTokenHandler(req, res));
+app.all('/api/ura/transactions', (req, res) => uraTransactionsHandler(req, res));
+app.all('/api/ura/private-property', (req, res) => uraTransactionsHandler(req, res));
+app.all('/api/ura/carparks', (req, res) => uraCarparksHandler(req, res));
 
 async function startServer() {
   const isProduction = process.env.NODE_ENV === 'production';

@@ -160,3 +160,93 @@ export async function getOneMapTokenStatus(): Promise<{ status: string; hasToken
   }
   return resp.json();
 }
+
+export interface UraTransactionItem {
+  id: string;
+  project: string;
+  street: string;
+  district: string;
+  marketSegment: string;
+  contractDate: string;
+  price: number;
+  areaSqm: number;
+  areaSqft: number;
+  psf: number;
+  propertyType: string;
+  tenure: string;
+  typeOfSale: 'New Sale' | 'Sub Sale' | 'Resale';
+  floorRange: string;
+  noOfUnits: number;
+}
+
+export interface UraTransactionsResponse {
+  success: boolean;
+  service: string;
+  source: 'ura_live' | 'fallback_offline';
+  notice?: string;
+  query: {
+    district: string;
+    project: string;
+    propertyType: string;
+    batchesFetched: number[];
+    limit: number;
+  };
+  analytics: {
+    totalFound: number;
+    returned: number;
+    avgPrice: number;
+    avgPsf: number;
+    minPrice: number;
+    maxPrice: number;
+  };
+  transactions: UraTransactionItem[];
+}
+
+export async function fetchUraPrivateTransactions(params: {
+  district?: string;
+  project?: string;
+  propertyType?: string;
+  batch?: string;
+  limit?: number;
+}): Promise<UraTransactionsResponse> {
+  const query = new URLSearchParams();
+  if (params.district) query.set('district', params.district);
+  if (params.project) query.set('project', params.project);
+  if (params.propertyType) query.set('propertyType', params.propertyType);
+  if (params.batch) query.set('batch', params.batch);
+  if (params.limit) query.set('limit', params.limit.toString());
+
+  const resp = await fetch(`/api/ura/transactions?${query.toString()}`);
+  if (!resp.ok) {
+    throw new Error(`URA Transactions API returned ${resp.status}`);
+  }
+  return resp.json();
+}
+
+export async function fetchUraCarparks(params?: {
+  type?: 'availability' | 'details' | 'both';
+  name?: string;
+}): Promise<any> {
+  const query = new URLSearchParams();
+  if (params?.type) query.set('type', params.type);
+  if (params?.name) query.set('name', params.name);
+
+  const resp = await fetch(`/api/ura/carparks?${query.toString()}`);
+  if (!resp.ok) {
+    throw new Error(`URA Carparks API returned ${resp.status}`);
+  }
+  return resp.json();
+}
+
+export async function getUraTokenStatus(): Promise<{
+  status: string;
+  hasToken: boolean;
+  source: string;
+  message: string;
+}> {
+  const resp = await fetch('/api/ura/token');
+  if (!resp.ok) {
+    throw new Error(`URA Token API returned ${resp.status}`);
+  }
+  return resp.json();
+}

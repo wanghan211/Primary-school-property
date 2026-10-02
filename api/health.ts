@@ -32,6 +32,11 @@ export default async function handler(req: any, res: any) {
         dataset: 'HDB Resale Prices (Jan 2017 onwards)',
         resourceId: 'd_8b84c4ee58e3cfc0ece0d773c8ca6abc',
       },
+      ura: {
+        status: process.env.URA_ACCESS_KEY ? 'ready' : 'ready_for_key',
+        hasAccessKey: !!process.env.URA_ACCESS_KEY,
+        services: ['PMI_Resi_Transaction', 'Car_Park_Availability', 'Car_Park_Details'],
+      },
     },
     endpoints: [
       { path: '/api/health', method: 'GET', description: 'System health and integration status' },
@@ -42,6 +47,9 @@ export default async function handler(req: any, res: any) {
       { path: '/api/onemap/reverse-geocode', method: 'GET', description: 'Reverse geocode coordinates to postal address' },
       { path: '/api/onemap/education', method: 'GET', description: 'Planning area education statistics' },
       { path: '/api/hdb/resale', method: 'GET', description: 'Data.gov.sg 10,000 HDB resale transactions with analytics' },
+      { path: '/api/ura/token', method: 'GET, POST', description: 'URA daily token exchange and verification' },
+      { path: '/api/ura/transactions', method: 'GET', description: 'URA private residential property transactions (4 batches merged)' },
+      { path: '/api/ura/carparks', method: 'GET', description: 'URA live carpark lots availability and rates' },
     ],
   };
 
