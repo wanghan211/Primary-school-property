@@ -22,32 +22,18 @@ import routeHandler from './api/onemap/route.ts';
 import educationHandler from './api/onemap/education.ts';
 import radiusHandler from './api/onemap/radius.ts';
 import hdbResaleHandler from './api/hdb/resale.ts';
+import healthHandler from './api/health.ts';
 
 // Mount API routes
+app.all('/api/health', (req, res) => healthHandler(req, res));
 app.all('/api/onemap/token', (req, res) => tokenHandler(req, res));
 app.all('/api/onemap/search', (req, res) => searchHandler(req, res));
 app.all('/api/onemap/reverse-geocode', (req, res) => reverseGeocodeHandler(req, res));
 app.all('/api/onemap/route', (req, res) => routeHandler(req, res));
 app.all('/api/onemap/education', (req, res) => educationHandler(req, res));
 app.all('/api/onemap/radius', (req, res) => radiusHandler(req, res));
+app.all('/api/radius', (req, res) => radiusHandler(req, res));
 app.all('/api/hdb/resale', (req, res) => hdbResaleHandler(req, res));
-
-// Health check endpoint
-app.get('/api/health', (_req, res) => {
-  res.json({
-    status: 'ok',
-    timestamp: new Date().toISOString(),
-    endpoints: [
-      '/api/onemap/token',
-      '/api/onemap/search',
-      '/api/onemap/reverse-geocode',
-      '/api/onemap/route',
-      '/api/onemap/education',
-      '/api/onemap/radius',
-      '/api/hdb/resale',
-    ],
-  });
-});
 
 async function startServer() {
   const isProduction = process.env.NODE_ENV === 'production';
