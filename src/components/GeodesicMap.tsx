@@ -1,4 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
+import L from 'leaflet';
+import 'leaflet/dist/leaflet.css';
 import {
   GraduationCap,
   Train,
@@ -9,11 +11,18 @@ import {
   Info,
   ExternalLink,
   Footprints,
-  Map as MapIcon,
+  Layers,
+  MapPin,
+  CheckCircle2,
+  X,
   Compass,
 } from 'lucide-react';
 import { Property, School } from '../types';
-import { OneMapMinimap } from './OneMapMinimap';
+import {
+  ONEMAP_BASEMAP_TILE_URL,
+  ONEMAP_BASEMAP_OPTIONS,
+  ONEMAP_MAP_STYLES,
+} from '../../api/basemap';
 
 interface GeodesicMapProps {
   school: School;
@@ -24,6 +33,42 @@ interface GeodesicMapProps {
   customDistance: number;
 }
 
+// Convert school ID or mapCoords to real Singapore lat/lng
+function getSchoolLatLng(school: School): [number, number] {
+  if ((school as any).lat && (school as any).lng) {
+    return [(school as any).lat, (school as any).lng];
+  }
+  if (school.id === 'tao-nan') return [1.30472, 103.90972]; // 49 Marine Crescent
+  if (school.id === 'nanyang-primary') return [1.3211, 103.8078]; // 52 King's Road
+  if (school.id === 'acs-primary') return [1.3184, 103.8378]; // 50 Barker Road
+  if (school.id === 'catholic-high') return [1.3546, 103.8447]; // 9 Bishan Street 22
+  if (school.id === 'rosyth') return [1.3725, 103.8744]; // Serangoon North
+  if (school.id === 'chij-st-nicholas') return [1.3732, 103.8344]; // Ang Mo Kio
+  return [1.30472, 103.90972];
+}
+
+// Convert property offset relative to school to Singapore lat/lng
+function getPropertyLatLng(prop: Property, schoolLatLng: [number, number]): [number, number] {
+  if ((prop as any).lat && (prop as any).lng) {
+    return [(prop as any).lat, (prop as any).lng];
+  }
+  // 145px ≈ 1000m => delta offset calculation
+  const centerMapX = 370;
+  const centerMapY = 370;
+  const deltaX = (prop.mapPos.x - centerMapX) * 0.000062;
+  const deltaY = (prop.mapPos.y - centerMapY) * 0.000062;
+  return [schoolLatLng[0] - deltaY, schoolLatLng[1] + deltaX];
+}
+
+// Convert transit / preschool offset
+function getPointLatLng(x: number, y: number, schoolLatLng: [number, number]): [number, number] {
+  const centerMapX = 370;
+  const centerMapY = 370;
+  const deltaX = (x - centerMapX) * 0.000062;
+  const deltaY = (y - centerMapY) * 0.000062;
+  return [schoolLatLng[0] - deltaY, schoolLatLng[1] + deltaX];
+}
+
 export const GeodesicMap: React.FC<GeodesicMapProps> = ({
   school,
   properties,
@@ -32,81 +77,431 @@ export const GeodesicMap: React.FC<GeodesicMapProps> = ({
   onOpenGeodesicInfo,
   customDistance,
 }) => {
+  const mapContainerRef = useRef<HTMLDivElement>(null);
+  const mapInstanceRef = useRef<L.Map | null>(null);
+  const tileLayerRef = useRef<L.TileLayer | null>(null);
+  const circlesLayerRef = useRef<L.LayerGroup | null>(null);
+  const transitLayerRef = useRef<L.LayerGroup | null>(null);
+  const preschoolsLayerRef = useRef<L.LayerGroup | null>(null);
+  const markersLayerRef = useRef<L.LayerGroup | null>(null);
+
   const [show1kmZone, setShow1kmZone] = useState(true);
   const [show2kmZone, setShow2kmZone] = useState(true);
   const [showMrt, setShowMrt] = useState(true);
   const [showPreschools, setShowPreschools] = useState(false);
-  const [showMinimap, setShowMinimap] = useState(true);
-  const [isMinimapExpanded, setIsMinimapExpanded] = useState(false);
-  const [zoomLevel, setZoomLevel] = useState(1);
+  const [activeStyle, setActiveStyle] = useState<'Default' | 'Night' | 'Original' | 'Grey'>('Default');
+  const [styleMenuOpen, setStyleMenuOpen] = useState(false);
+  const [currentZoom, setCurrentZoom] = useState(15);
   const [hoveredProperty, setHoveredProperty] = useState<Property | null>(null);
 
-  const handleZoomIn = () => setZoomLevel((prev) => Math.min(prev + 0.15, 1.45));
-  const handleZoomOut = () => setZoomLevel((prev) => Math.max(prev - 0.15, 0.75));
-  const handleResetZoom = () => setZoomLevel(1);
+  const schoolLatLng = getSchoolLatLng(school);
 
-  // SVG radius calculations based on customDistance (1.0km = 145px, 2.0km = 280px)
-  const customRadiusPx = customDistance * 145;
+  // 1. Initialize Leaflet Map with OneMap SLA Tile Layer
+  useEffect(() => {
+    if (!mapContainerRef.current) return;
+
+    if (!mapInstanceRef.current) {
+      const map = L.map(mapContainerRef.current, {
+        center: schoolLatLng,
+        zoom: 15,
+        minZoom: 11,
+        maxZoom: 19,
+        zoomControl: false,
+        attributionControl: false,
+        scrollWheelZoom: true,
+      });
+
+      // OneMap SLA Live Tile Layer
+      const basemap = L.tileLayer(ONEMAP_MAP_STYLES[activeStyle] || ONEMAP_BASEMAP_TILE_URL, {
+        detectRetina: true,
+        maxZoom: 19,
+        minZoom: 11,
+        attribution: ONEMAP_BASEMAP_OPTIONS.attribution,
+      });
+      basemap.addTo(map);
+      tileLayerRef.current = basemap;
+
+      // Layer groups for clean management
+      const circlesLayer = L.layerGroup().addTo(map);
+      const transitLayer = L.layerGroup().addTo(map);
+      const preschoolsLayer = L.layerGroup().addTo(map);
+      const markersLayer = L.layerGroup().addTo(map);
+
+      circlesLayerRef.current = circlesLayer;
+      transitLayerRef.current = transitLayer;
+      preschoolsLayerRef.current = preschoolsLayer;
+      markersLayerRef.current = markersLayer;
+
+      map.on('zoomend', () => {
+        setCurrentZoom(map.getZoom());
+      });
+
+      mapInstanceRef.current = map;
+    }
+
+    return () => {
+      if (mapInstanceRef.current) {
+        mapInstanceRef.current.remove();
+        mapInstanceRef.current = null;
+      }
+    };
+  }, []);
+
+  // 2. Change Tile Style when activeStyle changes
+  useEffect(() => {
+    if (!mapInstanceRef.current || !tileLayerRef.current) return;
+    const newUrl = ONEMAP_MAP_STYLES[activeStyle];
+    tileLayerRef.current.setUrl(newUrl);
+  }, [activeStyle]);
+
+  // 3. Re-center map when school changes
+  useEffect(() => {
+    if (mapInstanceRef.current) {
+      mapInstanceRef.current.setView(schoolLatLng, 15);
+    }
+  }, [school.id]);
+
+  // 4. Update Geodesic Distance Rings (1km, 2km, and custom)
+  useEffect(() => {
+    if (!mapInstanceRef.current || !circlesLayerRef.current) return;
+    const circlesLayer = circlesLayerRef.current;
+    circlesLayer.clearLayers();
+
+    // 2.0km Secondary Buffer Ring
+    if (show2kmZone) {
+      const circle2km = L.circle(schoolLatLng, {
+        radius: 2000,
+        color: '#2563eb',
+        fillColor: '#3b82f6',
+        fillOpacity: 0.05,
+        weight: 2,
+        dashArray: '8, 8',
+      });
+      circle2km.bindTooltip('2.0km Secondary Buffer Zone', {
+        permanent: false,
+        direction: 'top',
+        className: 'onemap-ring-tooltip',
+      });
+      circle2km.addTo(circlesLayer);
+    }
+
+    // 1.0km Critical Home-School Priority Zone Ring
+    if (show1kmZone) {
+      const circle1km = L.circle(schoolLatLng, {
+        radius: 1000,
+        color: '#059669',
+        fillColor: '#10b981',
+        fillOpacity: 0.09,
+        weight: 2.5,
+      });
+      circle1km.bindTooltip('1.0km Critical Home-School Priority Zone', {
+        permanent: false,
+        direction: 'top',
+        className: 'onemap-ring-tooltip',
+      });
+      circle1km.addTo(circlesLayer);
+    }
+
+    // Custom Distance Radius if set
+    if (
+      customDistance &&
+      Math.abs(customDistance - 1.0) > 0.05 &&
+      Math.abs(customDistance - 2.0) > 0.05
+    ) {
+      const customCircle = L.circle(schoolLatLng, {
+        radius: customDistance * 1000,
+        color: '#0284c7',
+        fillColor: '#0284c7',
+        fillOpacity: 0.04,
+        weight: 1.5,
+        dashArray: '4, 4',
+      });
+      customCircle.addTo(circlesLayer);
+    }
+  }, [school.id, show1kmZone, show2kmZone, customDistance]);
+
+  // 5. Update Transit & Preschool Overlays
+  useEffect(() => {
+    if (!transitLayerRef.current || !preschoolsLayerRef.current) return;
+
+    const transitLayer = transitLayerRef.current;
+    const preschoolsLayer = preschoolsLayerRef.current;
+
+    transitLayer.clearLayers();
+    preschoolsLayer.clearLayers();
+
+    // MRT Stations
+    if (showMrt && school.mrtStations) {
+      school.mrtStations.forEach((mrt) => {
+        const mrtLatLng = getPointLatLng(mrt.x, mrt.y, schoolLatLng);
+        const mrtIcon = L.divIcon({
+          className: 'onemap-mrt-marker',
+          html: `
+            <div style="transform: translate(-50%, -50%); display: flex; align-items: center; gap: 4px; background: rgba(255,255,255,0.95); backdrop-filter: blur(4px); padding: 3px 8px; border-radius: 8px; border: 1.5px solid #d97706; box-shadow: 0 2px 6px rgba(0,0,0,0.18); font-size: 11px; font-weight: 800; color: #78350f; white-space: nowrap;">
+              <span style="width: 7px; height: 7px; border-radius: 9999px; background: #b45309;"></span>
+              <span>${mrt.code} ${mrt.name}</span>
+            </div>
+          `,
+          iconSize: [0, 0],
+        });
+        const marker = L.marker(mrtLatLng, { icon: mrtIcon });
+        marker.bindPopup(`<b>${mrt.name} MRT Station</b><br/>Line: ${mrt.line} (${mrt.code})`);
+        marker.addTo(transitLayer);
+      });
+    }
+
+    // Preschools
+    if (showPreschools && school.preschools) {
+      school.preschools.forEach((pre) => {
+        const preLatLng = getPointLatLng(pre.x, pre.y, schoolLatLng);
+        const preIcon = L.divIcon({
+          className: 'onemap-preschool-marker',
+          html: `
+            <div style="transform: translate(-50%, -50%); display: flex; align-items: center; gap: 4px; background: #faf5ff; border: 1.5px solid #c084fc; padding: 2px 7px; border-radius: 6px; box-shadow: 0 2px 6px rgba(0,0,0,0.15); font-size: 10px; font-weight: 700; color: #581c87; white-space: nowrap;">
+              <span style="width: 6px; height: 6px; border-radius: 9999px; background: #9333ea;"></span>
+              <span>${pre.name}</span>
+            </div>
+          `,
+          iconSize: [0, 0],
+        });
+        const marker = L.marker(preLatLng, { icon: preIcon });
+        marker.bindPopup(`<b>${pre.name}</b><br/>Preschool / Early Childhood Centre`);
+        marker.addTo(preschoolsLayer);
+      });
+    }
+  }, [school.id, showMrt, showPreschools]);
+
+  // 6. Update Target School & Transaction Property Pins
+  useEffect(() => {
+    if (!markersLayerRef.current) return;
+    const markersLayer = markersLayerRef.current;
+    markersLayer.clearLayers();
+
+    // Central School Marker
+    const schoolIcon = L.divIcon({
+      className: 'onemap-target-school-pin',
+      html: `
+        <div style="transform: translate(-50%, -100%); display: flex; flex-direction: column; align-items: center; cursor: pointer; z-index: 50;">
+          <div style="position: relative; display: flex; align-items: center; justify-content: center;">
+            <span style="position: absolute; width: 44px; height: 44px; border-radius: 9999px; background: rgba(15, 23, 42, 0.25); animation: ping 2s cubic-bezier(0, 0, 0.2, 1) infinite;"></span>
+            <div style="width: 38px; height: 38px; border-radius: 14px; background: #0f172a; color: #ffffff; display: flex; align-items: center; justify-content: center; box-shadow: 0 6px 16px rgba(0,0,0,0.35); border: 2.5px solid #ffffff; ring: 2px solid #0f172a;">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#fbbf24" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M22 10v6M2 10l10-5 10 5-10 5z"/>
+                <path d="M6 12v5c3 3 9 3 12 0v-5"/>
+              </svg>
+            </div>
+          </div>
+          <div style="margin-top: 3px; padding: 3px 8px; background: #0f172a; color: #ffffff; font-size: 11px; font-weight: 800; border-radius: 6px; box-shadow: 0 4px 10px rgba(0,0,0,0.3); border: 1px solid #334155; white-space: nowrap; letter-spacing: 0.3px;">
+            ${school.shortName.toUpperCase()}
+          </div>
+        </div>
+      `,
+      iconSize: [0, 0],
+    });
+
+    const schoolMarker = L.marker(schoolLatLng, { icon: schoolIcon, zIndexOffset: 1000 });
+    schoolMarker.bindPopup(`
+      <div style="font-family: inherit; font-size: 12px; min-width: 200px;">
+        <div style="font-size: 14px; font-weight: 800; color: #0f172a; margin-bottom: 2px;">${school.name}</div>
+        <div style="color: #64748b; font-size: 11px;">${school.type} &bull; ${school.district}</div>
+        <div style="margin-top: 6px; padding: 4px 8px; background: #ecfdf5; border-radius: 6px; border: 1px solid #a7f3d0; color: #047857; font-size: 11px; font-weight: 700;">
+          1.0km / 2.0km Geodesic Priority Anchor
+        </div>
+      </div>
+    `);
+    schoolMarker.addTo(markersLayer);
+
+    // Property Transaction Pins within 1km and 2km
+    properties.forEach((prop) => {
+      const propLatLng = getPropertyLatLng(prop, schoolLatLng);
+      const isSelected = selectedProperty?.id === prop.id;
+      const is1km = prop.distanceKm <= 1.0;
+
+      // Price Formatting
+      const priceText =
+        prop.price >= 1000000
+          ? `$${(prop.price / 1000000).toFixed(2)}M`
+          : `$${(prop.price / 1000).toFixed(0)}k`;
+
+      // Styling based on 1km vs 2km and HDB vs Condo
+      let bgColor = '#ffffff';
+      let textColor = '#0f172a';
+      let borderColor = '#cbd5e1';
+
+      if (isSelected) {
+        bgColor = '#f59e0b';
+        textColor = '#ffffff';
+        borderColor = '#fbbf24';
+      } else if (is1km) {
+        if (prop.dwellingType === 'hdb') {
+          bgColor = '#0f172a';
+          textColor = '#ffffff';
+          borderColor = '#ffffff';
+        } else {
+          bgColor = '#047857';
+          textColor = '#ffffff';
+          borderColor = '#ffffff';
+        }
+      }
+
+      const dotColor = isSelected ? '#ffffff' : is1km ? '#34d399' : '#94a3b8';
+
+      const propIcon = L.divIcon({
+        className: 'onemap-property-pin',
+        html: `
+          <div style="transform: translate(-50%, -50%); cursor: pointer; transition: transform 0.15s cubic-bezier(0.4, 0, 0.2, 1); z-index: ${
+            isSelected ? 500 : 100
+          };">
+            <div style="background: ${bgColor}; color: ${textColor}; border: 2px solid ${borderColor}; padding: ${
+          isSelected ? '4px 10px' : is1km ? '3px 8px' : '2px 7px'
+        }; border-radius: 9999px; font-size: ${
+          isSelected ? '12px' : '11px'
+        }; font-weight: 800; white-space: nowrap; box-shadow: 0 4px 12px rgba(0,0,0,0.22); display: flex; align-items: center; gap: 4px;">
+              <span style="width: 6px; height: 6px; border-radius: 9999px; background: ${dotColor};"></span>
+              <span>${priceText}</span>
+            </div>
+          </div>
+        `,
+        iconSize: [0, 0],
+      });
+
+      const marker = L.marker(propLatLng, {
+        icon: propIcon,
+        zIndexOffset: isSelected ? 500 : 100,
+      });
+
+      // Events
+      marker.on('click', () => {
+        onSelectProperty(prop);
+      });
+
+      marker.on('mouseover', () => {
+        setHoveredProperty(prop);
+      });
+
+      marker.on('mouseout', () => {
+        setHoveredProperty(null);
+      });
+
+      marker.bindPopup(`
+        <div style="font-family: inherit; font-size: 12px; min-width: 200px;">
+          <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px;">
+            <span style="font-size: 10px; font-weight: 700; color: ${
+              is1km ? '#047857' : '#2563eb'
+            }; background: ${is1km ? '#ecfdf5' : '#eff6ff'}; padding: 2px 6px; border-radius: 4px;">
+              ${prop.distanceKm} km to School (${is1km ? '1km Priority' : '2km Buffer'})
+            </span>
+            <span style="font-size: 10px; color: #64748b;">${prop.dwellingLabel}</span>
+          </div>
+          <div style="font-size: 13px; font-weight: 800; color: #0f172a;">${prop.name}</div>
+          <div style="font-size: 14px; font-weight: 900; color: #0369a1; margin: 3px 0;">
+            $${prop.price.toLocaleString()} <span style="font-size: 11px; font-weight: normal; color: #64748b;">($${prop.psf} psf)</span>
+          </div>
+          <div style="font-size: 11px; color: #475569; display: flex; align-items: center; gap: 4px; margin-top: 4px;">
+            <span>🚶 ${prop.walkMinutes} mins walk (${prop.walkDistanceMeters}m)</span>
+          </div>
+        </div>
+      `);
+
+      marker.addTo(markersLayer);
+    });
+  }, [school.id, properties, selectedProperty?.id]);
+
+  // Center on school
+  const handleCenterSchool = () => {
+    if (mapInstanceRef.current) {
+      mapInstanceRef.current.flyTo(schoolLatLng, 15, { duration: 1.2 });
+    }
+  };
+
+  const handleZoomIn = () => {
+    mapInstanceRef.current?.zoomIn();
+  };
+
+  const handleZoomOut = () => {
+    mapInstanceRef.current?.zoomOut();
+  };
+
+  const propertiesWithin1km = properties.filter((p) => p.distanceKm <= 1.0);
+  const propertiesWithin2km = properties.filter((p) => p.distanceKm > 1.0 && p.distanceKm <= 2.0);
 
   return (
     <section
       className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-xs flex flex-col h-[750px] relative"
-      data-purpose="geodesic-map-view"
+      data-purpose="onemap-live-geodesic-map-view"
     >
       {/* Map Top HUD Controls */}
       <div className="absolute top-4 left-4 right-4 z-30 flex items-center justify-between pointer-events-none">
+        {/* Left Zones Filter */}
         <div className="flex items-center gap-2 pointer-events-auto">
           <button
             onClick={() => setShow1kmZone(!show1kmZone)}
             className={`px-3 py-1.5 rounded-xl border shadow-xs flex items-center gap-2 text-xs font-semibold backdrop-blur transition cursor-pointer ${
               show1kmZone
-                ? 'bg-white/95 text-slate-800 border-slate-200'
+                ? 'bg-white/95 text-slate-800 border-slate-200 shadow-sm'
                 : 'bg-slate-100/90 text-slate-400 border-slate-200 line-through'
             }`}
           >
             <span
               className={`w-2.5 h-2.5 rounded-full ring-2 ${
-                show1kmZone
-                  ? 'bg-emerald-500 ring-emerald-200'
-                  : 'bg-slate-300 ring-slate-200'
+                show1kmZone ? 'bg-emerald-500 ring-emerald-200' : 'bg-slate-300 ring-slate-200'
               }`}
             ></span>
-            <span>1.0km MOE Zone</span>
+            <span>1.0km Priority ({propertiesWithin1km.length})</span>
           </button>
 
           <button
             onClick={() => setShow2kmZone(!show2kmZone)}
             className={`px-3 py-1.5 rounded-xl border shadow-xs flex items-center gap-2 text-xs font-semibold backdrop-blur transition cursor-pointer ${
               show2kmZone
-                ? 'bg-white/95 text-slate-800 border-slate-200'
+                ? 'bg-white/95 text-slate-800 border-slate-200 shadow-sm'
                 : 'bg-slate-100/90 text-slate-400 border-slate-200 line-through'
             }`}
           >
             <span
               className={`w-2.5 h-2.5 rounded-full ring-2 ${
-                show2kmZone
-                  ? 'bg-blue-500 ring-blue-200'
-                  : 'bg-slate-300 ring-slate-200'
+                show2kmZone ? 'bg-blue-500 ring-blue-200' : 'bg-slate-300 ring-slate-200'
               }`}
             ></span>
-            <span>2.0km Secondary</span>
+            <span>2.0km Buffer ({propertiesWithin2km.length})</span>
           </button>
         </div>
 
+        {/* Right HUD Controls */}
         <div className="flex items-center gap-2 pointer-events-auto">
-          <button
-            onClick={() => setShowMinimap(!showMinimap)}
-            className={`px-3 py-1.5 rounded-xl border shadow-xs flex items-center gap-1.5 text-xs font-semibold backdrop-blur transition cursor-pointer ${
-              showMinimap
-                ? 'bg-sky-50 text-sky-900 border-sky-300 shadow-sm'
-                : 'bg-white/95 text-slate-700 border-slate-200 hover:bg-slate-50'
-            }`}
-            title="Toggle OneMap Singapore SLA Live Basemap"
-          >
-            <MapIcon className={`w-3.5 h-3.5 ${showMinimap ? 'text-sky-600' : 'text-slate-500'}`} />
-            <span>OneMap Basemap</span>
-          </button>
+          {/* Basemap Style Switcher */}
+          <div className="relative">
+            <button
+              onClick={() => setStyleMenuOpen(!styleMenuOpen)}
+              className="px-3 py-1.5 bg-white/95 text-slate-800 border border-slate-200 rounded-xl shadow-xs flex items-center gap-1.5 text-xs font-semibold backdrop-blur transition hover:bg-white cursor-pointer"
+              title="Change OneMap Basemap Style"
+            >
+              <Layers className="w-3.5 h-3.5 text-sky-600" />
+              <span>{activeStyle} Style</span>
+            </button>
+            {styleMenuOpen && (
+              <div className="absolute right-0 top-full mt-1.5 bg-white border border-slate-200 rounded-xl shadow-xl p-1.5 w-32 text-xs z-50">
+                {(['Default', 'Night', 'Original', 'Grey'] as const).map((styleKey) => (
+                  <button
+                    key={styleKey}
+                    onClick={() => {
+                      setActiveStyle(styleKey);
+                      setStyleMenuOpen(false);
+                    }}
+                    className={`w-full text-left px-2.5 py-1.5 rounded-lg cursor-pointer transition ${
+                      activeStyle === styleKey
+                        ? 'bg-sky-50 text-sky-700 font-bold'
+                        : 'text-slate-700 hover:bg-slate-50'
+                    }`}
+                  >
+                    {styleKey}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
 
+          {/* Transit MRT Button */}
           <button
             onClick={() => setShowMrt(!showMrt)}
             className={`px-3 py-1.5 rounded-xl border shadow-xs flex items-center gap-1.5 text-xs font-semibold backdrop-blur transition cursor-pointer ${
@@ -116,9 +511,10 @@ export const GeodesicMap: React.FC<GeodesicMapProps> = ({
             }`}
           >
             <Train className={`w-3.5 h-3.5 ${showMrt ? 'text-amber-600' : 'text-slate-400'}`} />
-            <span>TEL MRT</span>
+            <span>MRT</span>
           </button>
 
+          {/* Preschools Button */}
           <button
             onClick={() => setShowPreschools(!showPreschools)}
             className={`px-3 py-1.5 rounded-xl border shadow-xs flex items-center gap-1.5 text-xs font-semibold backdrop-blur transition cursor-pointer ${
@@ -128,314 +524,20 @@ export const GeodesicMap: React.FC<GeodesicMapProps> = ({
             }`}
           >
             <Baby
-              className={`w-3.5 h-3.5 ${
-                showPreschools ? 'text-purple-600' : 'text-slate-500'
-              }`}
+              className={`w-3.5 h-3.5 ${showPreschools ? 'text-purple-600' : 'text-slate-500'}`}
             />
             <span>Preschools</span>
           </button>
         </div>
       </div>
 
-      {/* Rendered Map Stage */}
-      <div className="flex-1 w-full h-full relative bg-[#edf2f7] overflow-hidden select-none">
-        <div
-          className="w-full h-full transition-transform duration-300 ease-out origin-center"
-          style={{ transform: `scale(${zoomLevel})` }}
-        >
-          {/* Vector Map Background Graphics (Streets & Coastline) */}
-          <svg className="w-full h-full absolute inset-0" xmlns="http://www.w3.org/2000/svg">
-            <defs>
-              <pattern
-                id="grid-pattern"
-                width="40"
-                height="40"
-                patternUnits="userSpaceOnUse"
-              >
-                <path
-                  d="M 40 0 L 0 0 0 40"
-                  fill="none"
-                  stroke="#e2e8f0"
-                  strokeWidth="0.8"
-                ></path>
-              </pattern>
-            </defs>
-
-            {/* Base Grid & Landmass */}
-            <rect width="100%" height="100%" fill="#f1f5f9"></rect>
-            <rect width="100%" height="100%" fill="url(#grid-pattern)" opacity="0.6"></rect>
-
-            {/* Major Roads (Simulated Marine Parade layout) */}
-            {/* ECP Expressway */}
-            <path
-              d="M -50 630 Q 300 580 850 560"
-              fill="none"
-              stroke="#cbd5e1"
-              strokeWidth="12"
-            ></path>
-            <path
-              d="M -50 630 Q 300 580 850 560"
-              fill="none"
-              stroke="#f8fafc"
-              strokeWidth="8"
-            ></path>
-
-            {/* Marine Parade Road */}
-            <path
-              d="M -50 380 Q 250 360 850 340"
-              fill="none"
-              stroke="#cbd5e1"
-              strokeWidth="8"
-            ></path>
-            <path
-              d="M -50 380 Q 250 360 850 340"
-              fill="none"
-              stroke="#ffffff"
-              strokeWidth="5"
-            ></path>
-
-            {/* Still Road South / Joo Chiat Road */}
-            <path d="M 320 0 L 320 750" fill="none" stroke="#cbd5e1" strokeWidth="6"></path>
-            <path d="M 320 0 L 320 750" fill="none" stroke="#ffffff" strokeWidth="3"></path>
-            <path d="M 180 0 L 170 750" fill="none" stroke="#e2e8f0" strokeWidth="4"></path>
-            <path d="M 520 0 L 510 750" fill="none" stroke="#e2e8f0" strokeWidth="4"></path>
-
-            {/* Labels for Roads */}
-            <text
-              x="70"
-              y="372"
-              fill="#94a3b8"
-              fontSize="9"
-              fontWeight="600"
-              letterSpacing="1"
-            >
-              MARINE PARADE ROAD
-            </text>
-            <text
-              x="326"
-              y="240"
-              fill="#94a3b8"
-              fontSize="9"
-              fontWeight="600"
-              letterSpacing="1"
-              transform="rotate(90 326 240)"
-            >
-              STILL ROAD SOUTH
-            </text>
-            <text
-              x="176"
-              y="200"
-              fill="#94a3b8"
-              fontSize="9"
-              fontWeight="600"
-              letterSpacing="1"
-              transform="rotate(90 176 200)"
-            >
-              JOO CHIAT ROAD
-            </text>
-            <text
-              x="516"
-              y="210"
-              fill="#94a3b8"
-              fontSize="9"
-              fontWeight="600"
-              letterSpacing="1"
-              transform="rotate(90 516 210)"
-            >
-              TELOK KURAU ROAD
-            </text>
-            <text
-              x="560"
-              y="555"
-              fill="#94a3b8"
-              fontSize="9"
-              fontWeight="700"
-              letterSpacing="1"
-            >
-              ECP (EAST COAST PARKWAY)
-            </text>
-
-            {/* 2.0km Secondary MOE Distance Ring */}
-            {show2kmZone && (
-              <g>
-                <circle
-                  cx={school.mapCoords.x}
-                  cy={school.mapCoords.y}
-                  r="280"
-                  fill="rgba(59, 130, 246, 0.04)"
-                  stroke="#3b82f6"
-                  strokeWidth="2"
-                  strokeDasharray="6 6"
-                ></circle>
-                <text
-                  x={school.mapCoords.x - 90}
-                  y="98"
-                  fill="#2563eb"
-                  fontSize="10"
-                  fontWeight="bold"
-                  letterSpacing="0.5"
-                >
-                  2.0 KM SECONDARY MOE BUFFER
-                </text>
-              </g>
-            )}
-
-            {/* 1.0km Critical Home-School Distance Ring */}
-            {show1kmZone && (
-              <g>
-                <circle
-                  cx={school.mapCoords.x}
-                  cy={school.mapCoords.y}
-                  r="145"
-                  fill="rgba(16, 185, 129, 0.07)"
-                  stroke="#10b981"
-                  strokeWidth="2.5"
-                ></circle>
-                <text
-                  x={school.mapCoords.x - 110}
-                  y="235"
-                  fill="#059669"
-                  fontSize="10"
-                  fontWeight="extrabold"
-                  letterSpacing="0.5"
-                >
-                  1.0 KM CRITICAL HOME-SCHOOL DISTANCE
-                </text>
-              </g>
-            )}
-
-            {/* Dynamic Custom Radius Indicator if different from 1km or 2km */}
-            {Math.abs(customDistance - 1.0) > 0.05 && Math.abs(customDistance - 2.0) > 0.05 && (
-              <circle
-                cx={school.mapCoords.x}
-                cy={school.mapCoords.y}
-                r={customRadiusPx}
-                fill="rgba(14, 165, 233, 0.03)"
-                stroke="#0284c7"
-                strokeWidth="1.5"
-                strokeDasharray="4 4"
-              ></circle>
-            )}
-
-            {/* School Ground Perimeter Polygon */}
-            <polygon
-              points="350,355 390,355 395,385 345,385"
-              fill="#0f172a"
-              opacity="0.1"
-            ></polygon>
-          </svg>
-
-          {/* Center: Target School Marker */}
-          <div
-            className="absolute -translate-x-1/2 -translate-y-1/2 z-20 flex flex-col items-center pointer-events-auto cursor-pointer"
-            style={{ top: `${school.mapCoords.y}px`, left: `${school.mapCoords.x}px` }}
-          >
-            <div className="relative flex items-center justify-center">
-              <span className="absolute w-12 h-12 rounded-full bg-slate-900/20 pulse-effect"></span>
-              <div className="w-10 h-10 rounded-2xl bg-slate-900 text-white flex items-center justify-center shadow-xl border-2 border-white ring-2 ring-slate-900/30">
-                <GraduationCap className="w-5 h-5 text-amber-400" />
-              </div>
-            </div>
-            <div className="mt-1 px-2.5 py-1 bg-slate-900 text-white text-[11px] font-bold rounded-md shadow-lg border border-slate-700 whitespace-nowrap flex items-center gap-1">
-              <span>{school.shortName.toUpperCase()}</span>
-            </div>
-          </div>
-
-          {/* Transit MRT Station Markers */}
-          {showMrt &&
-            school.mrtStations.map((mrt) => (
-              <div
-                key={mrt.code}
-                className="absolute -translate-x-1/2 -translate-y-1/2 z-10 flex items-center gap-1 bg-white/90 backdrop-blur px-2 py-1 rounded-md border border-amber-300 shadow-xs text-[10px] font-bold text-amber-900"
-                style={{ top: `${mrt.y}px`, left: `${mrt.x}px` }}
-              >
-                <span className="w-2 h-2 rounded-full bg-amber-600"></span>
-                <span>
-                  {mrt.code} {mrt.name}
-                </span>
-              </div>
-            ))}
-
-          {/* Preschool Markers */}
-          {showPreschools &&
-            school.preschools.map((pre, idx) => (
-              <div
-                key={idx}
-                className="absolute -translate-x-1/2 -translate-y-1/2 z-15 flex items-center gap-1 bg-purple-50/95 backdrop-blur px-2 py-0.5 rounded-md border border-purple-300 shadow-xs text-[9px] font-bold text-purple-900"
-                style={{ top: `${pre.y}px`, left: `${pre.x}px` }}
-              >
-                <Baby className="w-3 h-3 text-purple-600" />
-                <span>{pre.name}</span>
-              </div>
-            ))}
-
-          {/* Property Price Pins */}
-          {properties.map((prop) => {
-            const is1km = prop.distanceKm <= 1.0;
-            const isSelected = selectedProperty?.id === prop.id;
-            const isHovered = hoveredProperty?.id === prop.id;
-
-            return (
-              <div
-                key={prop.id}
-                onMouseEnter={() => setHoveredProperty(prop)}
-                onMouseLeave={() => setHoveredProperty(null)}
-                onClick={() => onSelectProperty(prop)}
-                className={`absolute -translate-x-1/2 -translate-y-1/2 z-20 group cursor-pointer transition-transform ${
-                  isSelected || isHovered ? 'scale-115 z-30' : 'hover:scale-110'
-                }`}
-                style={{ top: `${prop.mapPos.y}px`, left: `${prop.mapPos.x}px` }}
-              >
-                {/* Visual Pin Bubble */}
-                {is1km ? (
-                  prop.dwellingType === 'hdb' ? (
-                    <div
-                      className={`px-2.5 py-1 rounded-full font-bold text-xs shadow-md border-2 border-white flex items-center gap-1 transition ${
-                        isSelected
-                          ? 'bg-amber-500 text-white ring-2 ring-amber-300'
-                          : 'bg-slate-900 text-white'
-                      }`}
-                    >
-                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
-                      ${(prop.price / 1000).toFixed(0)}k
-                    </div>
-                  ) : (
-                    <div
-                      className={`px-2.5 py-1 rounded-full font-bold text-xs shadow-md border-2 border-white flex items-center gap-1 transition ${
-                        isSelected
-                          ? 'bg-amber-500 text-white ring-2 ring-amber-300'
-                          : 'bg-emerald-700 text-white'
-                      }`}
-                    >
-                      <span className="w-1.5 h-1.5 rounded-full bg-white"></span>$
-                      {(prop.price / 1000000).toFixed(2)}M
-                    </div>
-                  )
-                ) : (
-                  <div
-                    className={`px-2 py-0.5 rounded-full font-bold text-[11px] shadow border transition ${
-                      isSelected
-                        ? 'bg-amber-500 text-white border-amber-600 ring-2 ring-amber-300'
-                        : 'bg-white text-slate-800 border-slate-300'
-                    }`}
-                  >
-                    ${prop.price >= 1000000 ? `${(prop.price / 1000000).toFixed(2)}M` : `${(prop.price / 1000).toFixed(0)}k`}
-                  </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
+      {/* Main Leaflet Map Stage: OneMap SLA Live Basemap */}
+      <div className="flex-1 w-full h-full relative cursor-grab active:cursor-grabbing">
+        <div ref={mapContainerRef} className="w-full h-full" />
 
         {/* Hovered Property Tooltip Card */}
-        {hoveredProperty && (
-          <div
-            className="absolute z-40 bg-white/95 backdrop-blur border border-slate-200 rounded-xl shadow-xl p-3 w-64 pointer-events-none transition-all"
-            style={{
-              top: `${Math.min(Math.max(hoveredProperty.mapPos.y - 130, 20), 580)}px`,
-              left: `${Math.min(Math.max(hoveredProperty.mapPos.x - 120, 20), 400)}px`,
-            }}
-          >
+        {hoveredProperty && !selectedProperty && (
+          <div className="absolute top-20 left-4 z-40 bg-white/95 backdrop-blur border border-slate-200 rounded-xl shadow-xl p-3 w-64 pointer-events-none transition-all">
             <div className="flex items-center justify-between text-[10px] text-slate-400 mb-1">
               <span className="font-bold text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200">
                 {hoveredProperty.distanceKm} km to school
@@ -450,75 +552,108 @@ export const GeodesicMap: React.FC<GeodesicMapProps> = ({
             </div>
             <div className="mt-1.5 flex items-center gap-1 text-[10px] text-slate-600">
               <Footprints className="w-3 h-3 text-emerald-600" />
-              <span>{hoveredProperty.walkMinutes} mins walk ({hoveredProperty.walkDistanceMeters}m)</span>
+              <span>
+                {hoveredProperty.walkMinutes} mins walk ({hoveredProperty.walkDistanceMeters}m)
+              </span>
             </div>
           </div>
         )}
 
-        {/* OneMap SLA Live Tile Minimap Layer */}
-        {showMinimap ? (
-          <OneMapMinimap
-            school={school}
-            properties={properties}
-            selectedProperty={selectedProperty}
-            onSelectProperty={onSelectProperty}
-            show1kmZone={show1kmZone}
-            show2kmZone={show2kmZone}
-            isExpanded={isMinimapExpanded}
-            onToggleExpand={() => setIsMinimapExpanded(!isMinimapExpanded)}
-          />
-        ) : (
-          <button
-            onClick={() => setShowMinimap(true)}
-            className="absolute bottom-5 right-5 z-20 px-3 py-2 bg-slate-900/95 text-white rounded-xl shadow-xl border border-slate-700 text-xs font-bold flex items-center gap-2 hover:bg-slate-800 transition cursor-pointer backdrop-blur"
-            title="Open interactive OneMap Singapore Leaflet Basemap"
-          >
-            <Compass className="w-4 h-4 text-emerald-400" />
-            <span>Open OneMap SLA Minimap</span>
-          </button>
-        )}
+        {/* Selected Property Floating Detail Dock */}
+        {selectedProperty && (
+          <div className="absolute bottom-12 left-4 z-40 bg-white/95 backdrop-blur-md border border-slate-200 rounded-2xl shadow-2xl p-4 w-76 sm:w-88 transition-all pointer-events-auto">
+            <div className="flex items-start justify-between gap-2">
+              <div>
+                <span
+                  className={`text-[10px] font-bold px-2 py-0.5 rounded-full inline-block mb-1 ${
+                    selectedProperty.distanceKm <= 1.0
+                      ? 'bg-emerald-100 text-emerald-800'
+                      : 'bg-blue-100 text-blue-800'
+                  }`}
+                >
+                  {selectedProperty.distanceKm} km from {school.shortName}
+                </span>
+                <h4 className="font-extrabold text-sm text-slate-900 leading-snug">
+                  {selectedProperty.name}
+                </h4>
+                <p className="text-xs text-slate-500">{selectedProperty.location}</p>
+              </div>
+              <button
+                onClick={() => onSelectProperty(null as any)}
+                className="text-slate-400 hover:text-slate-600 p-1 cursor-pointer"
+                title="Deselect property"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
 
-        {/* Vector Stage Zoom Controls (shown only when minimap is collapsed or docked) */}
-        {!isMinimapExpanded && (
-          <div className="absolute top-16 right-4 z-20 flex flex-col gap-1.5 pointer-events-auto">
-            <button
-              onClick={handleZoomIn}
-              aria-label="Zoom in schematic"
-              title="Zoom in vector view"
-              className="w-8 h-8 bg-white/95 rounded-lg shadow-sm border border-slate-200 flex items-center justify-center text-slate-700 hover:bg-white transition cursor-pointer"
-            >
-              <Plus className="w-3.5 h-3.5" />
-            </button>
-            <button
-              onClick={handleZoomOut}
-              aria-label="Zoom out schematic"
-              title="Zoom out vector view"
-              className="w-8 h-8 bg-white/95 rounded-lg shadow-sm border border-slate-200 flex items-center justify-center text-slate-700 hover:bg-white transition cursor-pointer"
-            >
-              <Minus className="w-3.5 h-3.5" />
-            </button>
-            <button
-              onClick={handleResetZoom}
-              aria-label="Reset schematic view"
-              title="Reset center"
-              className="w-8 h-8 bg-white/95 rounded-lg shadow-sm border border-slate-200 flex items-center justify-center text-slate-700 hover:bg-white transition cursor-pointer"
-            >
-              <Crosshair className="w-3.5 h-3.5 text-sky-600" />
-            </button>
+            <div className="mt-2.5 pt-2.5 border-t border-slate-100 flex items-center justify-between">
+              <div>
+                <span className="text-xs text-slate-400">Price &amp; PSF</span>
+                <div className="text-base font-black text-sky-700">
+                  ${selectedProperty.price.toLocaleString()}
+                  <span className="text-xs font-normal text-slate-500 ml-1">
+                    (${selectedProperty.psf} psf)
+                  </span>
+                </div>
+              </div>
+              <div className="text-right">
+                <span className="text-xs text-slate-400">Walking Route</span>
+                <div className="text-xs font-bold text-emerald-700 flex items-center gap-1 justify-end">
+                  <Footprints className="w-3.5 h-3.5" />
+                  <span>{selectedProperty.walkMinutes} mins ({selectedProperty.walkDistanceMeters}m)</span>
+                </div>
+              </div>
+            </div>
           </div>
         )}
 
-        {/* Bottom Geodesic Legal Footnote */}
-        {!isMinimapExpanded && (
+        {/* Map Zoom & Location Floating Buttons */}
+        <div className="absolute bottom-10 right-4 z-30 flex flex-col gap-1.5">
+          <button
+            onClick={handleZoomIn}
+            aria-label="Zoom in"
+            title="Zoom in on OneMap tiles"
+            className="w-9 h-9 bg-white/95 rounded-xl shadow-md border border-slate-200 flex items-center justify-center text-slate-700 hover:bg-white transition cursor-pointer"
+          >
+            <Plus className="w-4 h-4" />
+          </button>
+          <button
+            onClick={handleZoomOut}
+            aria-label="Zoom out"
+            title="Zoom out on OneMap tiles"
+            className="w-9 h-9 bg-white/95 rounded-xl shadow-md border border-slate-200 flex items-center justify-center text-slate-700 hover:bg-white transition cursor-pointer"
+          >
+            <Minus className="w-4 h-4" />
+          </button>
+          <button
+            onClick={handleCenterSchool}
+            aria-label="Center on school"
+            title="Re-center on Target School"
+            className="w-9 h-9 bg-white/95 rounded-xl shadow-md border border-slate-200 flex items-center justify-center text-slate-700 hover:bg-white transition mt-1 cursor-pointer"
+          >
+            <Crosshair className="w-4 h-4 text-sky-600" />
+          </button>
+        </div>
+
+        {/* Bottom Geodesic Legal Footnote & Attribution */}
+        <div className="absolute bottom-0 left-0 right-0 bg-white/90 backdrop-blur-md px-3 py-1.5 text-[10px] text-slate-500 border-t border-slate-200 flex items-center justify-between z-20">
           <div
             onClick={onOpenGeodesicInfo}
-            className="absolute bottom-4 left-4 z-20 bg-white/90 backdrop-blur px-3 py-1.5 rounded-lg border border-slate-200 text-[11px] text-slate-500 flex items-center gap-1.5 shadow-xs cursor-pointer hover:bg-white hover:text-slate-800 transition"
+            className="flex items-center gap-1.5 cursor-pointer hover:text-slate-800 transition truncate"
           >
-            <Info className="w-3.5 h-3.5 text-slate-400" />
-            <span>Distances computed from school perimeter boundary under 2022 MOE revision</span>
-            <ExternalLink className="w-3 h-3 ml-1 text-slate-400" />
+            <Info className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+            <span className="truncate">
+              Distances computed from school perimeter boundary under 2022 MOE revision
+            </span>
+            <ExternalLink className="w-3 h-3 text-slate-400 shrink-0" />
           </div>
-        )}
+
+          <div
+            className="flex items-center gap-1.5 pl-2 shrink-0"
+            dangerouslySetInnerHTML={{ __html: ONEMAP_BASEMAP_OPTIONS.attribution }}
+          />
+        </div>
       </div>
     </section>
   );
