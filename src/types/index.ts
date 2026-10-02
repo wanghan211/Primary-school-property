@@ -24,9 +24,11 @@ export interface School {
   hdb2kmPsf: number;
   condo2kmPsf: number;
   mapCoords: { x: number; y: number };
+  lat?: number;
+  lng?: number;
   growth5Year: number;
-  mrtStations: { name: string; line: string; code: string; x: number; y: number }[];
-  preschools: { name: string; x: number; y: number }[];
+  mrtStations: { name: string; line: string; code: string; x: number; y: number; lat?: number; lng?: number }[];
+  preschools: { name: string; x: number; y: number; lat?: number; lng?: number }[];
   historicalPsf: {
     year: string;
     within1kmPsf: number;
@@ -68,6 +70,8 @@ export interface Property {
   phase2CStatusLevel: 'safe' | 'priority' | 'guaranteed' | 'risk';
   imageUrl: string;
   mapPos: { x: number; y: number };
+  lat?: number;
+  lng?: number;
   history: {
     date: string;
     price: number;
