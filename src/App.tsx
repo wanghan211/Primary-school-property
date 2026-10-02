@@ -24,6 +24,7 @@ import { CompareModal } from './components/CompareModal';
 import { BallotingStatsView } from './components/BallotingStatsView';
 import { PriceIndexView } from './components/PriceIndexView';
 import { Footer } from './components/Footer';
+import { ApiStatusModal } from './components/ApiStatusModal';
 import { ArrowRight, X, Building2, Check } from 'lucide-react';
 
 export default function App() {
@@ -50,6 +51,7 @@ export default function App() {
   const [isGeodesicOpen, setIsGeodesicOpen] = useState(false);
   const [isCompareOpen, setIsCompareOpen] = useState(false);
   const [isTermsOpen, setIsTermsOpen] = useState(false);
+  const [isApiStatusOpen, setIsApiStatusOpen] = useState(false);
 
   const [savedPropertyIds, setSavedPropertyIds] = useState<string[]>(['prop-1']);
   const [comparedPropertyIds, setComparedPropertyIds] = useState<string[]>([]);
@@ -143,6 +145,7 @@ export default function App() {
         setActiveTab={setActiveTab}
         savedCount={savedPropertyIds.length}
         onOpenMortgage={() => handleOpenMortgage(2280000)}
+        onOpenApiStatus={() => setIsApiStatusOpen(true)}
         schools={SCHOOLS}
         selectedSchool={selectedSchool}
         onSelectSchool={(s) => {
@@ -405,9 +408,15 @@ export default function App() {
         onOpenGeodesicInfo={() => setIsGeodesicOpen(true)}
         onOpenBallotingArchive={() => setActiveTab('balloting')}
         onOpenTerms={() => setIsTermsOpen(true)}
+        onOpenApiStatus={() => setIsApiStatusOpen(true)}
       />
 
       {/* Modals */}
+      <ApiStatusModal
+        isOpen={isApiStatusOpen}
+        onClose={() => setIsApiStatusOpen(false)}
+      />
+
       <MortgageModal
         isOpen={isMortgageOpen}
         onClose={() => setIsMortgageOpen(false)}

@@ -4,12 +4,14 @@ interface FooterProps {
   onOpenGeodesicInfo: () => void;
   onOpenBallotingArchive: () => void;
   onOpenTerms: () => void;
+  onOpenApiStatus: () => void;
 }
 
 export const Footer: React.FC<FooterProps> = ({
   onOpenGeodesicInfo,
   onOpenBallotingArchive,
   onOpenTerms,
+  onOpenApiStatus,
 }) => {
   return (
     <footer className="bg-white border-t border-slate-200 mt-10 py-6 text-xs text-slate-500">
@@ -40,6 +42,12 @@ export const Footer: React.FC<FooterProps> = ({
             className="hover:text-slate-900 transition cursor-pointer"
           >
             Terms of Intelligence
+          </button>
+          <button
+            onClick={onOpenApiStatus}
+            className="font-semibold text-sky-700 hover:text-sky-900 transition cursor-pointer"
+          >
+            OneMap &amp; HDB APIs (/api)
           </button>
         </div>
       </div>

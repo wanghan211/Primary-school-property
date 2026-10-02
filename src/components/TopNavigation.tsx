@@ -8,6 +8,7 @@ import {
   X,
   CheckCircle2,
   AlertTriangle,
+  Database,
 } from 'lucide-react';
 import { ActiveTab, School } from '../types';
 
@@ -16,6 +17,7 @@ interface TopNavigationProps {
   setActiveTab: (tab: ActiveTab) => void;
   savedCount: number;
   onOpenMortgage: () => void;
+  onOpenApiStatus: () => void;
   schools: School[];
   selectedSchool: School;
   onSelectSchool: (school: School) => void;
@@ -26,6 +28,7 @@ export const TopNavigation: React.FC<TopNavigationProps> = ({
   setActiveTab,
   savedCount,
   onOpenMortgage,
+  onOpenApiStatus,
   schools,
   selectedSchool,
   onSelectSchool,
@@ -178,6 +181,15 @@ export const TopNavigation: React.FC<TopNavigationProps> = ({
           >
             <Calculator className="w-3.5 h-3.5 text-slate-500" />
             <span>Mortgage</span>
+          </button>
+
+          <button
+            onClick={onOpenApiStatus}
+            className="hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold text-sky-800 bg-sky-50 border border-sky-200 rounded-lg hover:bg-sky-100 transition cursor-pointer"
+            title="Inspect OneMap & Data.gov.sg /api endpoints"
+          >
+            <Database className="w-3.5 h-3.5 text-sky-600" />
+            <span>API (/api)</span>
           </button>
 
           <div className="hidden sm:flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold text-slate-700 bg-slate-100 rounded-lg border border-slate-200">

@@ -1,0 +1,81 @@
+import express from 'express';
+import { createServer as createViteServer } from 'vite';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import dotenv from 'dotenv';
+
+dotenv.config();
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+const app = express();
+const PORT = Number(process.env.PORT) || 3000;
+
+app.use(express.json());
+
+// Import API handlers directly from root /api
+import tokenHandler from './api/onemap/token.ts';
+import searchHandler from './api/onemap/search.ts';
+import reverseGeocodeHandler from './api/onemap/reverse-geocode.ts';
+import routeHandler from './api/onemap/route.ts';
+import educationHandler from './api/onemap/education.ts';
+import radiusHandler from './api/onemap/radius.ts';
+import hdbResaleHandler from './api/hdb/resale.ts';
+
+// Mount API routes
+app.all('/api/onemap/token', (req, res) => tokenHandler(req, res));
+app.all('/api/onemap/search', (req, res) => searchHandler(req, res));
+app.all('/api/onemap/reverse-geocode', (req, res) => reverseGeocodeHandler(req, res));
+app.all('/api/onemap/route', (req, res) => routeHandler(req, res));
+app.all('/api/onemap/education', (req, res) => educationHandler(req, res));
+app.all('/api/onemap/radius', (req, res) => radiusHandler(req, res));
+app.all('/api/hdb/resale', (req, res) => hdbResaleHandler(req, res));
+
+// Health check endpoint
+app.get('/api/health', (_req, res) => {
+  res.json({
+    status: 'ok',
+    timestamp: new Date().toISOString(),
+    endpoints: [
+      '/api/onemap/token',
+      '/api/onemap/search',
+      '/api/onemap/reverse-geocode',
+      '/api/onemap/route',
+      '/api/onemap/education',
+      '/api/onemap/radius',
+      '/api/hdb/resale',
+    ],
+  });
+});
+
+async function startServer() {
+  const isProduction = process.env.NODE_ENV === 'production';
+
+  if (!isProduction) {
+    // Mount Vite dev server middleware
+    const vite = await createViteServer({
+      server: {
+        middlewareMode: true,
+        hmr: process.env.DISABLE_HMR !== 'true',
+      },
+      appType: 'spa',
+    });
+    app.use(vite.middlewares);
+  } else {
+    // Serve static files in production
+    app.use(express.static(path.resolve(__dirname, 'dist')));
+    app.get('*', (_req, res) => {
+      res.sendFile(path.resolve(__dirname, 'dist', 'index.html'));
+    });
+  }
+
+  app.listen(PORT, '0.0.0.0', () => {
+    console.log(`EduHomes SG Server running on http://0.0.0.0:${PORT}`);
+  });
+}
+
+startServer().catch((err) => {
+  console.error('Failed to start server:', err);
+  process.exit(1);
+});
